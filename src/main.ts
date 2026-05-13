@@ -23,18 +23,19 @@ type AppState =
 let state: AppState = 'idle'
 let audioChunks: Uint8Array[] = []
 let transcript = ''
-let agentResponse = ''
+let geminiResponse = ''
 let errorMsg = ''
 
 // ---------------------------------------------------------------------------
 // Config — served by the Vite dev-server middleware (see vite.config.ts)
 // ---------------------------------------------------------------------------
-async function getConfig(): Promise<{ apiKey: string; agentId: string }> {
+async function getConfig(): Promise<{ apiKey: string; model: string }> {
   try {
     const res = await fetch('/api/config')
-    return await res.json()
+    const cfg = await res.json()
+    return { apiKey: cfg.apiKey || '', model: cfg.model || 'gemini-2.0-flash' }
   } catch {
-    return { apiKey: '', agentId: '' }
+    return { apiKey: '', model: 'gemini-2.0-flash' }
   }
 }
 
@@ -49,7 +50,7 @@ function mergeChunks(chunks: Uint8Array[]): Uint8Array {
   return out
 }
 
-function pcmToWav(pcm: Uint8Array): Blob {
+function pcmToWav(pcm: Uint8Array): Uint8Array {
   const sr = 16000, ch = 1, bps = 16
   const byteRate = sr * ch * (bps / 8)
   const blockAlign = ch * (bps / 8)
@@ -74,8 +75,9 @@ function pcmToWav(pcm: Uint8Array): Blob {
   w(36, 'data')
   v.setUint32(40, pcm.length, true)
 
-  new Uint8Array(buf).set(pcm, 44)
-  return new Blob([buf], { type: 'audio/wav' })
+  const out = new Uint8Array(buf)
+  out.set(pcm, 44)
+  return out
 }
 
 /** Convert Uint8Array → base64, chunked to avoid call-stack overflow. */
@@ -90,105 +92,55 @@ function uint8ToBase64(data: Uint8Array): string {
 }
 
 // ---------------------------------------------------------------------------
-// ElevenLabs — Speech-to-Text
+// Gemini API (Google AI Studio)
 // ---------------------------------------------------------------------------
-async function transcribeAudio(wav: Blob, apiKey: string): Promise<string> {
-  const form = new FormData()
-  form.append('file', wav, 'recording.wav')
-  form.append('model_id', 'scribe_v1')
+type GeminiPart =
+  | { text: string }
+  | { inline_data: { mime_type: string; data: string } }
 
-  const res = await fetch('https://api.elevenlabs.io/v1/speech-to-text', {
+async function callGemini(
+  apiKey: string,
+  model: string,
+  parts: GeminiPart[],
+  systemInstruction?: string,
+): Promise<string> {
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`
+  const body: Record<string, unknown> = {
+    contents: [{ parts }],
+  }
+  if (systemInstruction) {
+    body.system_instruction = { parts: [{ text: systemInstruction }] }
+  }
+
+  const res = await fetch(`${url}?key=${apiKey}`, {
     method: 'POST',
-    headers: { 'xi-api-key': apiKey },
-    body: form,
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
   })
 
-  if (!res.ok) throw new Error(`STT error ${res.status}`)
+  if (!res.ok) {
+    const txt = await res.text()
+    throw new Error(`Gemini ${res.status}: ${txt.slice(0, 120)}`)
+  }
+
   const data = await res.json()
-  return data.text || ''
+  return data.candidates?.[0]?.content?.parts?.[0]?.text || ''
 }
 
-// ---------------------------------------------------------------------------
-// ElevenLabs — Conversational AI Agent
-// ---------------------------------------------------------------------------
-async function sendToAgent(
-  pcm: Uint8Array,
-  apiKey: string,
-  agentId: string,
-): Promise<string> {
-  // 1. Get a signed WebSocket URL
-  const urlRes = await fetch(
-    `https://api.elevenlabs.io/v1/convai/conversation/get_signed_url?agent_id=${agentId}`,
-    { headers: { 'xi-api-key': apiKey } },
+async function transcribeAudio(wav: Uint8Array, apiKey: string, model: string): Promise<string> {
+  return callGemini(apiKey, model, [
+    { text: 'Transcribe this audio exactly. Return only the transcription, nothing else.' },
+    { inline_data: { mime_type: 'audio/wav', data: uint8ToBase64(wav) } },
+  ])
+}
+
+async function askGemini(question: string, apiKey: string, model: string): Promise<string> {
+  return callGemini(
+    apiKey,
+    model,
+    [{ text: question }],
+    'You are a helpful assistant. Keep responses concise — under 400 characters — as they are displayed on smart glasses with a tiny screen.',
   )
-  if (!urlRes.ok) throw new Error(`Agent auth failed: ${urlRes.status}`)
-  const { signed_url } = await urlRes.json()
-
-  // 2. Open the conversation
-  return new Promise<string>((resolve, reject) => {
-    const ws = new WebSocket(signed_url)
-    let response = ''
-    let settled = false
-    let debounce: ReturnType<typeof setTimeout> | null = null
-
-    const hardTimeout = setTimeout(() => finish(
-      response || new Error('Agent timeout (30 s)'),
-    ), 30_000)
-
-    function finish(result: string | Error) {
-      if (settled) return
-      settled = true
-      clearTimeout(hardTimeout)
-      if (debounce) clearTimeout(debounce)
-      try { ws.close() } catch { /* ok */ }
-      result instanceof Error ? reject(result) : resolve(result)
-    }
-
-    ws.onmessage = (ev) => {
-      try {
-        const msg = JSON.parse(ev.data)
-
-        // Connection ready — stream the recorded audio
-        if (msg.type === 'conversation_initiation_metadata') {
-          const chunk = 8000 // ~250 ms of 16 kHz / 16-bit mono
-          for (let i = 0; i < pcm.length; i += chunk) {
-            ws.send(JSON.stringify({
-              user_audio_chunk: uint8ToBase64(pcm.subarray(i, i + chunk)),
-            }))
-          }
-          // 1.5 s of silence so the agent's VAD detects end-of-speech
-          ws.send(JSON.stringify({
-            user_audio_chunk: uint8ToBase64(new Uint8Array(48_000)),
-          }))
-        }
-
-        // Accumulate the agent's streamed text response
-        if (msg.type === 'agent_response') {
-          response += msg.agent_response_event?.agent_response || ''
-          // Resolve 3 s after the last token (agent is done talking)
-          if (debounce) clearTimeout(debounce)
-          debounce = setTimeout(() => finish(response), 3000)
-        }
-
-        // The server may send a corrected transcript
-        if (msg.type === 'agent_response_correction') {
-          response =
-            msg.agent_response_correction_event?.corrected_text || response
-        }
-
-        // Keep-alive
-        if (msg.type === 'ping') {
-          ws.send(JSON.stringify({
-            type: 'pong',
-            event_id: msg.ping_event?.event_id,
-          }))
-        }
-      } catch { /* ignore malformed frames */ }
-    }
-
-    ws.onerror = () => finish(new Error('WebSocket error'))
-    ws.onclose = () => finish(response || new Error('Connection closed'))
-  })
 }
 
 // ---------------------------------------------------------------------------
@@ -218,7 +170,7 @@ async function transition(next: AppState) {
     case 'idle':
       audioChunks = []
       transcript = ''
-      agentResponse = ''
+      geminiResponse = ''
       await show(`Hello, ${userName}!\n\nTap to record\nDouble-tap to exit`)
       break
 
@@ -236,7 +188,8 @@ async function transition(next: AppState) {
         if (!cfg.apiKey) throw new Error('No API key — set it in the browser')
         const pcm = mergeChunks(audioChunks)
         if (pcm.length < 16_000) throw new Error('Too short — hold longer')
-        transcript = await transcribeAudio(pcmToWav(pcm), cfg.apiKey)
+        const wav = pcmToWav(pcm)
+        transcript = await transcribeAudio(wav, cfg.apiKey, cfg.model)
         if (!transcript.trim()) throw new Error('No speech detected')
         await transition('confirm')
       } catch (e: unknown) {
@@ -247,29 +200,27 @@ async function transition(next: AppState) {
     }
 
     case 'confirm':
-      await show(`"${transcript}"\n\nTap: send to agent\nSwipe ↓: cancel`)
+      await show(`"${transcript}"\n\nTap: ask Gemini\nSwipe ↓: cancel`)
       break
 
     case 'sending': {
-      await show('Sending to agent...')
+      await show('Thinking...')
       try {
         const cfg = await getConfig()
-        if (!cfg.agentId) throw new Error('No Agent ID — set it in the browser')
-        const pcm = mergeChunks(audioChunks)
-        agentResponse = await sendToAgent(pcm, cfg.apiKey, cfg.agentId)
-        if (!agentResponse.trim()) throw new Error('Empty agent response')
+        geminiResponse = await askGemini(transcript, cfg.apiKey, cfg.model)
+        if (!geminiResponse.trim()) throw new Error('Empty response')
         await transition('response')
       } catch (e: unknown) {
-        errorMsg = e instanceof Error ? e.message : 'Agent error'
+        errorMsg = e instanceof Error ? e.message : 'Gemini error'
         await transition('error')
       }
       break
     }
 
     case 'response': {
-      const text = agentResponse.length > 450
-        ? agentResponse.slice(0, 447) + '...'
-        : agentResponse
+      const text = geminiResponse.length > 450
+        ? geminiResponse.slice(0, 447) + '...'
+        : geminiResponse
       await show(`${text}\n\nTap for new message`)
       break
     }

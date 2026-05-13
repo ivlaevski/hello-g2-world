@@ -5,7 +5,7 @@ const CONFIG = 'config.local'
 
 function readConfig() {
   try { return JSON.parse(readFileSync(CONFIG, 'utf-8')) }
-  catch { return { apiKey: '', agentId: '' } }
+  catch { return { apiKey: '' } }
 }
 
 export default defineConfig({

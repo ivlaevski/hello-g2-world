@@ -75,7 +75,19 @@
         font-family: 'SF Mono', 'Fira Code', monospace;
         outline: none;
       }
-      .field input:focus { border-color: #7dd3fc; }
+      .field input:focus, .field select:focus { border-color: #7dd3fc; }
+      .field select {
+        width: 100%;
+        padding: 0.5rem 0.75rem;
+        background: #0f1117;
+        border: 1px solid #2a2d37;
+        border-radius: 6px;
+        color: #e0e0e0;
+        font-size: 0.9rem;
+        font-family: 'SF Mono', 'Fira Code', monospace;
+        outline: none;
+        cursor: pointer;
+      }
       .save-btn {
         width: 100%;
         padding: 0.5rem;
@@ -116,16 +128,21 @@
       <div id="qr-code"></div>
       <div class="url-display" id="app-url"></div>
 
-      <!-- ElevenLabs settings -->
+      <!-- Google AI Studio settings -->
       <div class="settings">
-        <h2>ElevenLabs Settings</h2>
+        <h2>Google AI Studio</h2>
         <div class="field">
-          <label for="apiKey">API Key</label>
-          <input type="password" id="apiKey" placeholder="xi-..." autocomplete="off" />
+          <label for="apiKey">Gemini API Key</label>
+          <input type="password" id="apiKey" placeholder="AIza..." autocomplete="off" />
         </div>
         <div class="field">
-          <label for="agentId">Agent ID</label>
-          <input type="text" id="agentId" placeholder="agent_..." autocomplete="off" />
+          <label for="model">Model</label>
+          <select id="model">
+            <option value="gemini-2.0-flash">gemini-2.0-flash</option>
+            <option value="gemini-2.5-flash">gemini-2.5-flash</option>
+            <option value="gemini-2.5-pro">gemini-2.5-pro</option>
+            <option value="gemini-2.0-flash-lite">gemini-2.0-flash-lite</option>
+          </select>
         </div>
         <button class="save-btn" id="saveBtn">Save Settings</button>
         <div id="saveStatus"></div>
@@ -160,15 +177,15 @@
 
       // ---- Settings ----
       var apiKeyInput = document.getElementById('apiKey');
-      var agentIdInput = document.getElementById('agentId');
+      var modelSelect = document.getElementById('model');
       var saveStatus  = document.getElementById('saveStatus');
 
       // Load saved settings on page open
       fetch('/api/config')
         .then(function(r) { return r.json(); })
         .then(function(cfg) {
-          if (cfg.apiKey)  apiKeyInput.value  = cfg.apiKey;
-          if (cfg.agentId) agentIdInput.value = cfg.agentId;
+          if (cfg.apiKey) apiKeyInput.value = cfg.apiKey;
+          if (cfg.model)  modelSelect.value = cfg.model;
         })
         .catch(function() {});
 
@@ -177,10 +194,7 @@
           var res = await fetch('/api/config', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              apiKey:  apiKeyInput.value,
-              agentId: agentIdInput.value,
-            }),
+            body: JSON.stringify({ apiKey: apiKeyInput.value, model: modelSelect.value }),
           });
           if (!res.ok) throw new Error();
           saveStatus.textContent = '✓ Settings saved';
