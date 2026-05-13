@@ -21,16 +21,8 @@
         max-width: 480px;
         padding: 2rem;
       }
-      h1 {
-        font-size: 1.5rem;
-        margin-bottom: 0.25rem;
-        color: #fff;
-      }
-      .subtitle {
-        font-size: 0.9rem;
-        color: #888;
-        margin-bottom: 2rem;
-      }
+      h1 { font-size: 1.5rem; margin-bottom: 0.25rem; color: #fff; }
+      .subtitle { font-size: 0.9rem; color: #888; margin-bottom: 2rem; }
       #qr-code {
         background: #fff;
         display: inline-block;
@@ -50,6 +42,58 @@
         color: #7dd3fc;
         word-break: break-all;
       }
+
+      /* ---- Settings ---- */
+      .settings {
+        background: #1a1d27;
+        border: 1px solid #2a2d37;
+        border-radius: 12px;
+        padding: 1.5rem;
+        margin-bottom: 1.5rem;
+        text-align: left;
+      }
+      .settings h2 {
+        font-size: 1rem;
+        margin-bottom: 1rem;
+        color: #fff;
+      }
+      .field { margin-bottom: 0.75rem; }
+      .field label {
+        display: block;
+        font-size: 0.8rem;
+        color: #888;
+        margin-bottom: 0.25rem;
+      }
+      .field input {
+        width: 100%;
+        padding: 0.5rem 0.75rem;
+        background: #0f1117;
+        border: 1px solid #2a2d37;
+        border-radius: 6px;
+        color: #e0e0e0;
+        font-size: 0.9rem;
+        font-family: 'SF Mono', 'Fira Code', monospace;
+        outline: none;
+      }
+      .field input:focus { border-color: #7dd3fc; }
+      .save-btn {
+        width: 100%;
+        padding: 0.5rem;
+        background: #2563eb;
+        border: none;
+        border-radius: 6px;
+        color: #fff;
+        font-size: 0.9rem;
+        cursor: pointer;
+      }
+      .save-btn:hover { background: #1d4ed8; }
+      #saveStatus {
+        text-align: center;
+        margin-top: 0.5rem;
+        font-size: 0.8rem;
+        min-height: 1.2rem;
+      }
+
       .steps {
         text-align: left;
         font-size: 0.85rem;
@@ -64,12 +108,29 @@
     <!-- SDK entry point (runs on glasses / simulator) -->
     <script type="module" src="/src/main.ts"></script>
 
-    <!-- Browser-visible QR helper -->
+    <!-- Browser-visible helper UI -->
     <div class="container">
       <h1>Hello World</h1>
       <p class="subtitle">Even Realities G2</p>
+
       <div id="qr-code"></div>
       <div class="url-display" id="app-url"></div>
+
+      <!-- ElevenLabs settings -->
+      <div class="settings">
+        <h2>ElevenLabs Settings</h2>
+        <div class="field">
+          <label for="apiKey">API Key</label>
+          <input type="password" id="apiKey" placeholder="xi-..." autocomplete="off" />
+        </div>
+        <div class="field">
+          <label for="agentId">Agent ID</label>
+          <input type="text" id="agentId" placeholder="agent_..." autocomplete="off" />
+        </div>
+        <button class="save-btn" id="saveBtn">Save Settings</button>
+        <div id="saveStatus"></div>
+      </div>
+
       <ol class="steps">
         <li>Make sure your <strong>phone</strong> and <strong>computer</strong> are on the same Wi-Fi</li>
         <li>Open the <strong>Even Realities App</strong> on your phone</li>
@@ -79,8 +140,7 @@
     </div>
 
     <script>
-      // QR helper — only runs when the library has loaded (async).
-      // If it never loads (e.g. simulator with no internet), the SDK still works fine.
+      // ---- QR code (non-blocking — skipped if CDN is unreachable) ----
       function renderQR() {
         if (typeof qrcode === 'undefined') return;
         try {
@@ -94,10 +154,43 @@
           console.warn('QR generation skipped:', e);
         }
       }
-      // Try immediately (library may already be cached), then retry after a short delay
       renderQR();
       setTimeout(renderQR, 1000);
       window.addEventListener('load', renderQR);
+
+      // ---- Settings ----
+      var apiKeyInput = document.getElementById('apiKey');
+      var agentIdInput = document.getElementById('agentId');
+      var saveStatus  = document.getElementById('saveStatus');
+
+      // Load saved settings on page open
+      fetch('/api/config')
+        .then(function(r) { return r.json(); })
+        .then(function(cfg) {
+          if (cfg.apiKey)  apiKeyInput.value  = cfg.apiKey;
+          if (cfg.agentId) agentIdInput.value = cfg.agentId;
+        })
+        .catch(function() {});
+
+      document.getElementById('saveBtn').addEventListener('click', async function() {
+        try {
+          var res = await fetch('/api/config', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              apiKey:  apiKeyInput.value,
+              agentId: agentIdInput.value,
+            }),
+          });
+          if (!res.ok) throw new Error();
+          saveStatus.textContent = '✓ Settings saved';
+          saveStatus.style.color = '#4ade80';
+        } catch (e) {
+          saveStatus.textContent = '✗ Save failed';
+          saveStatus.style.color = '#f87171';
+        }
+        setTimeout(function() { saveStatus.textContent = ''; }, 3000);
+      });
     </script>
   </body>
 </html>
