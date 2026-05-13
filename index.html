@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Hello World — Even G2</title>
+    <script async src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.min.js"></script>
+    <style>
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      body {
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        background: #0f1117;
+        color: #e0e0e0;
+        min-height: 100vh;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+      }
+      .container {
+        text-align: center;
+        max-width: 480px;
+        padding: 2rem;
+      }
+      h1 {
+        font-size: 1.5rem;
+        margin-bottom: 0.25rem;
+        color: #fff;
+      }
+      .subtitle {
+        font-size: 0.9rem;
+        color: #888;
+        margin-bottom: 2rem;
+      }
+      #qr-code {
+        background: #fff;
+        display: inline-block;
+        padding: 16px;
+        border-radius: 12px;
+        margin-bottom: 1.5rem;
+      }
+      #qr-code img { display: block; }
+      .url-display {
+        font-family: 'SF Mono', 'Fira Code', monospace;
+        font-size: 0.95rem;
+        background: #1a1d27;
+        border: 1px solid #2a2d37;
+        border-radius: 8px;
+        padding: 0.75rem 1.25rem;
+        margin-bottom: 1.5rem;
+        color: #7dd3fc;
+        word-break: break-all;
+      }
+      .steps {
+        text-align: left;
+        font-size: 0.85rem;
+        color: #aaa;
+        line-height: 1.8;
+      }
+      .steps li { margin-bottom: 0.25rem; }
+      .steps strong { color: #e0e0e0; }
+    </style>
+  </head>
+  <body>
+    <!-- SDK entry point (runs on glasses / simulator) -->
+    <script type="module" src="/src/main.ts"></script>
+
+    <!-- Browser-visible QR helper -->
+    <div class="container">
+      <h1>Hello World</h1>
+      <p class="subtitle">Even Realities G2</p>
+      <div id="qr-code"></div>
+      <div class="url-display" id="app-url"></div>
+      <ol class="steps">
+        <li>Make sure your <strong>phone</strong> and <strong>computer</strong> are on the same Wi-Fi</li>
+        <li>Open the <strong>Even Realities App</strong> on your phone</li>
+        <li>Go to <strong>Even Hub &rarr; Developer</strong></li>
+        <li>Tap <strong>Scan QR</strong> and scan the code above</li>
+      </ol>
+    </div>
+
+    <script>
+      // QR helper — only runs when the library has loaded (async).
+      // If it never loads (e.g. simulator with no internet), the SDK still works fine.
+      function renderQR() {
+        if (typeof qrcode === 'undefined') return;
+        try {
+          var url = window.location.origin;
+          document.getElementById('app-url').textContent = url;
+          var qr = qrcode(0, 'M');
+          qr.addData(url);
+          qr.make();
+          document.getElementById('qr-code').innerHTML = qr.createImgTag(6, 0);
+        } catch (e) {
+          console.warn('QR generation skipped:', e);
+        }
+      }
+      // Try immediately (library may already be cached), then retry after a short delay
+      renderQR();
+      setTimeout(renderQR, 1000);
+      window.addEventListener('load', renderQR);
+    </script>
+  </body>
+</html>

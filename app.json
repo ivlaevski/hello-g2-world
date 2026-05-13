@@ -1,0 +1,21 @@
+{
+  "package_id": "com.example.helloworld",
+  "edition": "202601",
+  "name": "Hello World",
+  "version": "0.2.0",
+  "min_app_version": "2.0.0",
+  "min_sdk_version": "0.0.10",
+  "entrypoint": "index.html",
+  "permissions": [
+    {
+      "name": "network",
+      "desc": "Connect to ElevenLabs for transcription and agent communication",
+      "whitelist": ["https://api.elevenlabs.io"]
+    },
+    {
+      "name": "g2-microphone",
+      "desc": "Record voice messages for dictation"
+    }
+  ],
+  "supported_languages": ["en"]
+}
